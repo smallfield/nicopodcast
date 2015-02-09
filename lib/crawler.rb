@@ -6,6 +6,7 @@ require 'rubygems'
 require 'nicovideo'
 require 'yaml'
 
+require_relative '../nicovideo/nico'
 $KCODE = 'UTF8'
 
 class Crawler
@@ -158,34 +159,79 @@ class Crawler
     account = YAML.load_file(@account_setting_file)
     mail = account['mail']
     password = account['password']
-
-    nv = Nicovideo.new(mail, password)
-    nv.login
+    nv = Nicovideo.login(mail, password)
     video_ids.each do |video_id|
       nv.watch(video_id) do |v|
         puts "id: #{video_id}"
         puts "downloading #{@video_titles[video_id]}(#{video_id})"
         filepath = output_file_fullpath(video_id,@input_file_type)
 
-        begin
-          File.open(filepath, "wb") {|f| f.write v.flv }
-        rescue Timeout::Error => e
-          sleep 3
-          puts "timeout error, retry"
-          retry
-        rescue => err
-          p err
-          puts "deleting file"
-          File.delete(filepath)
-          puts "sleep 3 seconds"
+        params = v.send(:get_params)
+        url = URI.parse(URI.decode(params["url"]))
+
+        if url.scheme == "http"
+          filesize = download_via_http(v, filepath)
+        elsif url.scheme == "rtmpe"
+          filesize = download_via_rtmp(v, filepath)
         else
-          puts "...done"
+          raise Nicovideo::UnavailableVideoError.new
         end
         sleep 3 if video_ids.size > 1
       end
     end
 
     return
+  end
+
+  def download_via_http(nv_video, filepath)
+    binary = nv_video.video
+    filesize = binary.bytesize
+    File.open(filepath, "wb") {|f|
+      f.write(binary)
+    }
+    return filesize
+  end
+
+  def download_via_rtmp(nv_video, filepath)
+    params = nv_video.send(:get_params)
+    url = URI.parse(URI.decode(params['url']))
+    fmst = URI.decode(params['fmst']).split(":")
+    playpath = url.query.sub("m=", "")
+
+    tc_url = "#{url.scheme}://#{url.host}#{url.path}"
+    page_url = "http://www.nicovideo.jp/watch/#{nv_video.video_id}"
+    swf_url = "http://res.nimg.jp/swf/player/secure_nccreator.swf?t=201111091500"
+    flash_ver = %q{"WIN 11,6,602,180"}
+
+    resume = ""
+    config = YAML.load_file(@account_setting_file)
+
+    50.times {|i|
+      system(config["rtmpdump"] +
+        " -l 2" +
+        " -a smile" +
+        " -n #{url.host}" +
+        " -t #{tc_url}" +
+        " -p #{page_url}" +
+        " -s #{swf_url}" +
+        " -f #{flash_ver}" +
+        " -y #{playpath}" +
+        " -C S:#{fmst.last}" +
+        " -C S:#{fmst.first}" +
+        " -C S:#{playpath}" +
+        " -o #{filepath}" +
+        " #{resume}")
+      resume = "-e"
+      break if $?.exitstatus != 2
+      sleep 1
+    }
+
+    if $?.exitstatus == 0
+      filesize = File.size(filepath)
+      return filesize
+    else
+      raise Nicovideo::UnavailableVideoError.new
+    end
   end
 
   # エンコードすべき動画を調べてエンコードする
@@ -212,7 +258,9 @@ class Crawler
       puts "encoding #{video_id}"
       input_path = output_file_fullpath(video_id,@input_file_type)
       output_path = output_file_fullpath(video_id,@output_file_type)
-      system "ffmpeg -i #{input_path} #{@ffmpeg_option} #{output_path}"
+      command = "ffmpeg -i #{input_path} #{@ffmpeg_option} #{output_path}"
+      puts command
+      system command
       puts "...done"
     end
     return
@@ -255,8 +303,8 @@ class Crawler
       maker.items.do_sort = true
 
       @input_feed.items.each do |in_item|
-        key = in_item.link.scan(/(\w\w\d+)/).first.to_s
-        unless @file_sizes[key][@output_file_type]
+        key = in_item.link.scan(/(\w\w\d+)/).first.to_s.gsub(/[\[\]"]/,"")
+        if @file_sizes[key] == nil || @file_sizes[key][@output_file_type] == nil
           puts "skip #{key}"
           puts "skip #{@video_titles[key]}"
           next

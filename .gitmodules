@@ -1,0 +1,3 @@
+[submodule "nicovideo"]
+	path = nicovideo
+	url = https://github.com/tondol/NicoVideo.git
