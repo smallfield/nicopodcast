@@ -1,2 +1,3 @@
 mail: hoge@gmail.com
 password: hoge
+rtmpdump: /usr/local/bin/rtmpdump
