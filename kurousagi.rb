@@ -2,7 +2,7 @@
 
 # 田村ゆかりのいたずら黒うさぎを取得するサンプル
 
-require './lib/crawler.rb'
+require_relative './lib/crawler.rb'
 
 class MyCrawler < Crawler
 

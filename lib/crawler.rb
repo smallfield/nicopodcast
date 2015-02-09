@@ -6,8 +6,7 @@ require 'rubygems'
 require 'nicovideo'
 require 'yaml'
 
-require_relative '../nicovideo/nico'
-$KCODE = 'UTF8'
+require_relative './nicovideo/nico'
 
 class Crawler
   attr_writer :input_feed_url, :output_feed_path, :output_file_path, :output_file_url
